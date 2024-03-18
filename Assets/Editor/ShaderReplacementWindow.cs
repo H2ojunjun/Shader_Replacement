@@ -20,7 +20,7 @@ public class ShaderReplacementWindow : EditorWindow
         window.Show();
     }
 
-    private string cacheFolderPath;
+    private string ruleFolderPath;
 
     private Shader _resShader;
     private Shader _destShader;
@@ -32,13 +32,14 @@ public class ShaderReplacementWindow : EditorWindow
     private float _propInterval = 3;
     private List<Rect> _resPorts = new List<Rect>();
     private List<Rect> _destPorts = new List<Rect>();
-    private Rect _cacheRect = new Rect();
+    private Rect _ruleRect = new Rect();
     private Rect _scrollArea;
     private int _draggingIndex = -1;
     private bool _showType = true;
     private bool _isOnlyShowConnect = false;
     private List<Material> _replacedMat = new List<Material>();
     private string _resSearchStr;
+
     private string _destSearchStr;
     //private Texture _dot;
     // private Texture dot
@@ -53,88 +54,166 @@ public class ShaderReplacementWindow : EditorWindow
     //     }
     // }
 
-    // private void OnEnable()
-    // {
-    //     if (AssetDatabase.IsValidFolder("Assets/Arts"))
-    //     {
-    //         cacheFolderPath = "Assets/Arts/Script/CU/Editor/ShaderReplaceCache/";
-    //     }
-    //     else
-    //     {
-    //         cacheFolderPath = "Assets/Script/CU/Editor/ShaderReplaceCache/";
-    //     }
-    // }
-
-    private void OnGUI()
+    private ShaderReplaceRule Rule
     {
-        if (_rule != null)
+        get => _rule;
+        set
         {
-            GUI.enabled = false;
-        }
-        _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
-        if (_rule != null)
-        {
-            GUI.enabled = true;
-        }
-        EditorGUI.BeginChangeCheck();
-        _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
-        if (EditorGUI.EndChangeCheck())
-        {
-            if (_rule)
-                _rule.SetShader(_destShader, false);
-            ResetCachePropInfo(false);
-        }
-        _replacementType = (EShowType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
-        EditorGUI.BeginChangeCheck();
-        _rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", _rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
-        if (EditorGUI.EndChangeCheck())
-        {
-            if (_rule != null)
+            if (_rule != value)
             {
-                _resShader = _rule.resShader;
-                _destShader = _rule.destShader;
-                _resPorts.Clear();
-                _destPorts.Clear();
-            }
-            else
-            {
-                _resShader = null;
-                _destShader = null;
-                _resPorts.Clear();
-                _destPorts.Clear();
-            }
-        }
-        if (_rule == null)
-        {
-            if (GUILayout.Button("新建规则", GUILayout.Width(500)))
-            {
-                if (_resShader == null)
+                _rule = value;
+                if (_rule != null)
                 {
-                    Debug.LogError("请先选择一个源shader");
-                    return;
-                }
-                int index = _resShader.name.LastIndexOf("/");
-                string name = _resShader.name.Substring(index);
-                string assetName = $"{ name }_replacement.asset";
-                string path = cacheFolderPath + assetName;
-                var savedCache = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(path);
-                if (savedCache != null)
-                {
-                    Debug.LogError($"shader:{name}已经有替换规则了，请勿重复创建");
-                    return;
+                    _resShader = _rule.ResShader;
+                    _destShader = _rule.DestShader;
                 }
                 else
                 {
-                    _rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
-                    AssetDatabase.CreateAsset(_rule, path);
-                    _rule.SetShader(_resShader, true);
-                    _rule.SetShader(_destShader, false);
-                    ResetCachePropInfo(true);
-                    ResetCachePropInfo(false);
+                    _resShader = null;
+                    _destShader = null;
                 }
+
+                _resPorts.Clear();
+                _destPorts.Clear();
             }
         }
-        if (_rule != null)
+    }
+
+    private string GetShaderName(Shader shader)
+    {
+        return shader.name.Replace("/", "_");
+    }
+
+    private void DrawBaseInfo()
+    {
+        GUI.enabled = true;
+        if (Rule != null)
+        {
+            GUI.enabled = false;
+        }
+
+        _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
+        _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
+        GUI.enabled = true;
+        Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
+        if (Rule == null)
+        {
+            if (_resShader != null && _destShader != null && GUILayout.Button("创建规则",GUILayout.Width(500), GUILayout.Height(20)))
+            {
+                string assetName = $"replace_shader_{GetShaderName(_resShader)}_to_{GetShaderName(_destShader)}";
+                var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", assetName, "asset", "");
+                if (string.IsNullOrEmpty(userSelectPath))
+                {
+                    Debug.LogError("未选择路径");
+                    return;
+                }
+
+                if (!userSelectPath.Contains("Editor"))
+                {
+                    Debug.LogError("路径中必须包含Editor");
+                    return;
+                }
+
+                var savedRule = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(userSelectPath);
+                if (savedRule != null)
+                {
+                    AssetDatabase.DeleteAsset(userSelectPath);
+                    AssetDatabase.Refresh();
+                }
+                var rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
+                AssetDatabase.CreateAsset(rule, userSelectPath);
+                rule.SetShader(_resShader, _destShader);
+                Rule = rule;
+            }
+        }
+        else
+        {
+            if (GUILayout.Button("重置",GUILayout.Width(500), GUILayout.Height(20)))
+            {
+                Rule = null;
+            }
+
+            _replacementType = (EShowType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
+        }
+    }
+
+    private void OnGUI()
+    {
+        // if (Rule != null)
+        // {
+        //     GUI.enabled = false;
+        // }
+        //
+        // _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
+        // // if (Rule != null)
+        // // {
+        // //     GUI.enabled = true;
+        // // }
+        // //EditorGUI.BeginChangeCheck();
+        // _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
+        // // if (EditorGUI.EndChangeCheck())
+        // // {
+        // //     if (Rule)
+        // //         Rule.SetShader(_destShader, false);
+        // //     ResetCachePropInfo(false);
+        // // }
+        // EditorGUI.BeginChangeCheck();
+        // GUI.enabled = true;
+        // Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
+        // if (EditorGUI.EndChangeCheck())
+        // {
+        //     if (Rule != null)
+        //     {
+        //         _resShader = Rule._resShader;
+        //         _destShader = Rule._destShader;
+        //         _resPorts.Clear();
+        //         _destPorts.Clear();
+        //     }
+        //     else
+        //     {
+        //         _resShader = null;
+        //         _destShader = null;
+        //         _resPorts.Clear();
+        //         _destPorts.Clear();
+        //     }
+        // }
+        //
+        // if (Rule == null)
+        // {
+        //     if (GUILayout.Button("新建规则", GUILayout.Width(500)))
+        //     {
+        //         if (_resShader == null)
+        //         {
+        //             Debug.LogError("请先选择一个源shader");
+        //             return;
+        //         }
+        //
+        //         int index = _resShader.name.LastIndexOf("/");
+        //         string name = _resShader.name.Substring(index);
+        //         string assetName = $"{name}_replacement.asset";
+        //         var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", "Assets", ".asset")
+        //         string path = +assetName;
+        //         var savedCache = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(path);
+        //         if (savedCache != null)
+        //         {
+        //             Debug.LogError($"shader:{name}已经有替换规则了，请勿重复创建");
+        //             return;
+        //         }
+        //         else
+        //         {
+        //             Rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
+        //             AssetDatabase.CreateAsset(Rule, path);
+        //             Rule.SetShader(_resShader, true);
+        //             Rule.SetShader(_destShader, false);
+        //             ResetCachePropInfo(true);
+        //             ResetCachePropInfo(false);
+        //         }
+        //     }
+        // }
+
+        DrawBaseInfo();
+
+        if (Rule != null)
         {
             //检测鼠标输入
             Control();
@@ -158,6 +237,7 @@ public class ShaderReplacementWindow : EditorWindow
                 {
                     _draggingIndex = GetIndexCotainsMousePosition(mousePos, true);
                 }
+
                 break;
             case EventType.MouseUp:
                 if (_draggingIndex != -1)
@@ -167,24 +247,27 @@ public class ShaderReplacementWindow : EditorWindow
                         int i = GetIndexCotainsMousePosition(mousePos, false);
                         if (i != -1)
                         {
-                            var resPropInfo = _rule.resPropertyInfoList[_draggingIndex];
+                            var resPropInfo = Rule.resPropertyInfoList[_draggingIndex];
                             var resType = resPropInfo.type;
-                            var destPropInfo = _rule.destPropertyInfoList[i];
+                            var destPropInfo = Rule.destPropertyInfoList[i];
                             var destType = destPropInfo.type;
                             if (IsShaderPropertyTypeEqual(resType, destType))
                             {
                                 bool destHasBeenUse = IsDestHasBeenConnect(i);
                                 if (!destHasBeenUse)
-                                    _rule.SetMapping(_draggingIndex, i);
+                                    Rule.SetMapping(_draggingIndex, i);
                                 else
-                                    Debug.LogError($"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
+                                    Debug.LogError(
+                                        $"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
                             }
                             else
                             {
-                                Debug.LogError($"类型不匹配！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
+                                Debug.LogError(
+                                    $"类型不匹配！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
                                     $"目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color> 目标类型<color=red>{destPropInfo.type}</color>");
                             }
                         }
+
                         _draggingIndex = -1;
                     }
                 }
@@ -199,26 +282,25 @@ public class ShaderReplacementWindow : EditorWindow
                             var destIndex = GetIndexCotainsMousePosition(mousePos, false);
                             if (destIndex != -1)
                             {
-                                for (int i = 0; i < _rule.propertyMapping.Count; i++)
+                                for (int i = 0; i < Rule.propertyMapping.Count; i++)
                                 {
-                                    if (_rule.propertyMapping[i] == destIndex)
+                                    if (Rule.propertyMapping[i] == destIndex)
                                     {
                                         resIndex = i;
                                     }
                                 }
                             }
                         }
+
                         if (resIndex != -1)
                         {
                             GenericMenu menu = new GenericMenu();
-                            menu.AddItem(new GUIContent("break"), false, () =>
-                            {
-                                _rule.SetMapping(resIndex, -1);
-                            });
+                            menu.AddItem(new GUIContent("break"), false, () => { Rule.SetMapping(resIndex, -1); });
                             menu.DropDown(new Rect(mousePos, Vector2.zero));
                         }
                     }
                 }
+
                 break;
             default:
                 break;
@@ -229,11 +311,12 @@ public class ShaderReplacementWindow : EditorWindow
     private bool IsDestHasBeenConnect(int i)
     {
         bool destHasBeenUse = false;
-        foreach (var destIndex in _rule.propertyMapping)
+        foreach (var destIndex in Rule.propertyMapping)
         {
             if (destIndex == i)
                 destHasBeenUse = true;
         }
+
         return destHasBeenUse;
     }
 
@@ -247,6 +330,7 @@ public class ShaderReplacementWindow : EditorWindow
                 return i;
             }
         }
+
         return -1;
     }
 
@@ -257,6 +341,7 @@ public class ShaderReplacementWindow : EditorWindow
         {
             mousePos = mousePos + _scrollRoot;
         }
+
         return mousePos;
     }
 
@@ -269,9 +354,10 @@ public class ShaderReplacementWindow : EditorWindow
     {
         if (Event.current.type == EventType.Repaint)
         {
-            _cacheRect = GUILayoutUtility.GetLastRect();
+            _ruleRect = GUILayoutUtility.GetLastRect();
         }
-        var lastRect = _cacheRect;
+
+        var lastRect = _ruleRect;
         lastRect.y += lastRect.height + 10;
         lastRect.x += 20;
         lastRect.width = 700;
@@ -289,6 +375,7 @@ public class ShaderReplacementWindow : EditorWindow
         {
             _resPorts.Clear();
         }
+
         DrawProperties(searchRect, true);
         lastRect.x += 420;
         searchRect = new Rect(lastRect.x, lastRect.y, 220, 20);
@@ -298,6 +385,7 @@ public class ShaderReplacementWindow : EditorWindow
         {
             _destPorts.Clear();
         }
+
         DrawProperties(searchRect, false);
         DrawMapping();
         DrawMouseDragingLine();
@@ -309,15 +397,12 @@ public class ShaderReplacementWindow : EditorWindow
     {
         lastRect = new Rect(lastRect.x, lastRect.y + lastRect.height, 220, 30);
         var shader = isRes ? _resShader : _destShader;
-        var propertyInfoList = isRes ? _rule.resPropertyInfoList : _rule.destPropertyInfoList;
+        var propertyInfoList = isRes ? Rule.resPropertyInfoList : Rule.destPropertyInfoList;
         var portXOffset = isRes ? lastRect.width - 6 : -6;
         var ports = isRes ? _resPorts : _destPorts;
         var searchStr = isRes ? _resSearchStr : _destSearchStr;
-        bool isRecalculatePort = false;
-        if (ports.Count == 0)
-        {
-            isRecalculatePort = true;
-        }
+        bool isRecalculatePort = ports.Count == 0;
+
         if (shader != null)
         {
             int index = 0;
@@ -328,13 +413,14 @@ public class ShaderReplacementWindow : EditorWindow
                 {
                     if (isRes)
                     {
-                        info.visible = _rule.propertyMapping[index] != -1;
+                        info.visible = Rule.propertyMapping[index] != -1;
                     }
                     else
                     {
                         info.visible = IsDestHasBeenConnect(index);
                     }
                 }
+
                 string showText = null;
                 switch (_replacementType)
                 {
@@ -347,6 +433,7 @@ public class ShaderReplacementWindow : EditorWindow
                     default:
                         break;
                 }
+
                 if (!string.IsNullOrEmpty(searchStr))
                 {
                     if (!showText.ToLower().Contains(searchStr.ToLower()))
@@ -354,6 +441,7 @@ public class ShaderReplacementWindow : EditorWindow
                         info.visible = false;
                     }
                 }
+
                 if (info.visible)
                 {
                     if (_showType)
@@ -363,11 +451,12 @@ public class ShaderReplacementWindow : EditorWindow
                     GUI.color = Color.red;
                     Rect portRect = new Rect(lastRect.x + portXOffset, lastRect.y + lastRect.height / 2 - 6, 12, 12);
                     //GUI.DrawTexture(portRect, dot);
-                    Handles.DrawSolidDisc(portRect.position, Vector3.forward, 1);
+                    Handles.DrawSolidDisc(portRect.position, Vector3.forward, 6);
                     if (isRecalculatePort)
                     {
                         ports.Add(portRect);
                     }
+
                     GUI.color = c;
                     lastRect.y += lastRect.height + _propInterval;
                 }
@@ -378,6 +467,7 @@ public class ShaderReplacementWindow : EditorWindow
                         ports.Add(Rect.zero);
                     }
                 }
+
                 index++;
             }
         }
@@ -385,18 +475,19 @@ public class ShaderReplacementWindow : EditorWindow
 
     private void DrawMapping()
     {
-        for (int i = 0; i < _rule.propertyMapping.Count; i++)
+        for (int i = 0; i < Rule.propertyMapping.Count; i++)
         {
-            if (_rule.resPropertyInfoList[i].visible)
+            if (Rule.resPropertyInfoList[i].visible)
             {
-                var destIndex = _rule.propertyMapping[i];
+                var destIndex = Rule.propertyMapping[i];
                 if (destIndex >= 0)
                 {
-                    if (_rule.destPropertyInfoList.Count > 0 && destIndex < _rule.destPropertyInfoList.Count && _rule.destPropertyInfoList[destIndex].visible)
+                    if (Rule.destPropertyInfoList.Count > 0 && destIndex < Rule.destPropertyInfoList.Count && Rule.destPropertyInfoList[destIndex].visible)
                     {
                         Rect resPortRect = _resPorts[i];
                         Rect destPortRect = _destPorts[destIndex];
-                        Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2), destPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2));
+                        Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2),
+                            destPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2));
                     }
                 }
             }
@@ -424,64 +515,74 @@ public class ShaderReplacementWindow : EditorWindow
             _resPorts.Clear();
             _destPorts.Clear();
         }
+
         if (GUILayout.Button("清除属性映射", GUILayout.Width(150)))
         {
             if (EditorUtility.DisplayDialog("警告!", "你确定要清除映射吗?", "确定", "取消"))
             {
-                _rule.ResetMapping();
+                Rule.ResetMapping();
                 Repaint();
             }
         }
+
         if (GUILayout.Button("按照名字映射", GUILayout.Width(150)))
         {
             int i = 0;
-            foreach (var resPi in _rule.resPropertyInfoList)
+            foreach (var resPi in Rule.resPropertyInfoList)
             {
                 _replacementType = EShowType.Name;
                 int j = 0;
-                foreach (var destPi in _rule.destPropertyInfoList)
+                foreach (var destPi in Rule.destPropertyInfoList)
                 {
-                    if (destPi.name == resPi.name && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && _rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                    if (destPi.name == resPi.name && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
                     {
-                        _rule.SetMapping(i, j);
+                        Rule.SetMapping(i, j);
                     }
+
                     j++;
                 }
+
                 i++;
             }
         }
+
         if (GUILayout.Button("按照描述映射", GUILayout.Width(150)))
         {
             _replacementType = EShowType.Description;
             int i = 0;
-            foreach (var resPi in _rule.resPropertyInfoList)
+            foreach (var resPi in Rule.resPropertyInfoList)
             {
                 int j = 0;
-                foreach (var destPi in _rule.destPropertyInfoList)
+                foreach (var destPi in Rule.destPropertyInfoList)
                 {
-                    if (destPi.desc == resPi.desc && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && _rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                    if (destPi.desc == resPi.desc && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
                     {
-                        _rule.SetMapping(i, j);
+                        Rule.SetMapping(i, j);
                     }
+
                     j++;
                 }
+
                 i++;
             }
         }
+
         if (GUILayout.Button("替换shader", GUILayout.Width(150)))
         {
-            RepalceShader();
+            ReplaceShader();
         }
+
         EditorGUILayout.EndHorizontal();
     }
 
-    private void RepalceShader()
+    private void ReplaceShader()
     {
-        if (_rule.destShader == null)
+        if (Rule.DestShader == null)
         {
             Debug.LogError("目标shader为空，无法替换!");
             return;
         }
+
         _replacedMat.Clear();
         string folder = EditorUtility.OpenFolderPanel("替换路径", "Assets", "");
         if (string.IsNullOrEmpty(folder))
@@ -494,22 +595,23 @@ public class ShaderReplacementWindow : EditorWindow
             Debug.LogError("没有找到任何源shader对应的材质");
             return;
         }
+
         Dictionary<int, object> resMatProp = new Dictionary<int, object>();
         foreach (var guid in guids)
         {
             var assetPath = AssetDatabase.GUIDToAssetPath(guid);
             Material m = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
-            if (m != null && m.shader == _rule.resShader && AssetDatabase.IsMainAsset(m))
+            if (m != null && m.shader == Rule.ResShader && AssetDatabase.IsMainAsset(m))
             {
                 EditorUtility.SetDirty(m);
                 resMatProp.Clear();
-                for (int index = 0; index < _rule.propertyMapping.Count; index++)
+                for (int index = 0; index < Rule.propertyMapping.Count; index++)
                 {
-                    if (_rule.propertyMapping[index] != -1)
+                    if (Rule.propertyMapping[index] != -1)
                     {
                         try
                         {
-                            var info = _rule.resPropertyInfoList[index];
+                            var info = Rule.resPropertyInfoList[index];
                             switch (info.type)
                             {
                                 case ShaderPropertyType.Color:
@@ -552,16 +654,17 @@ public class ShaderReplacementWindow : EditorWindow
                         }
                     }
                 }
-                m.shader = _rule.destShader;
+
+                m.shader = Rule.DestShader;
                 foreach (var kv in resMatProp)
                 {
                     try
                     {
                         var index = kv.Key;
-                        var destIndex = _rule.propertyMapping[index];
+                        var destIndex = Rule.propertyMapping[index];
                         if (destIndex != -1)
                         {
-                            var info = _rule.destPropertyInfoList[destIndex];
+                            var info = Rule.destPropertyInfoList[destIndex];
                             switch (info.type)
                             {
                                 case ShaderPropertyType.Color:
@@ -600,8 +703,10 @@ public class ShaderReplacementWindow : EditorWindow
                         Debug.LogError($"写入材质时出现异常！res shader prop index:{kv.Key} {e.Message} \r\n {e.StackTrace}");
                     }
                 }
+
                 _replacedMat.Add(m);
             }
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log("替换成功！");
@@ -626,47 +731,50 @@ public class ShaderReplacementWindow : EditorWindow
                 EditorGUI.ObjectField(lastRect, mat, typeof(Material), false);
                 lastRect.y += lastRect.height;
             }
+
             GUI.enabled = true;
             GUI.EndScrollView();
         }
     }
 
-    private void ResetCachePropInfo(bool isRes)
-    {
-        if (_rule != null)
-        {
-            List<ShaderPropInfo> shaderInfoList = null;
-            Shader shader = null;
-            List<Rect> ports = null;
-            if (isRes)
-            {
-                shaderInfoList = _rule.resPropertyInfoList;
-                shader = _resShader;
-                ports = _resPorts;
-            }
-            else
-            {
-                shaderInfoList = _rule.destPropertyInfoList;
-                shader = _destShader;
-                ports = _destPorts;
-            }
-            shaderInfoList.Clear();
-            ports.Clear();
-            if (shader != null)
-            {
-                int count = shader.GetPropertyCount();
-                for (int i = 0; i < count; i++)
-                {
-                    ShaderPropInfo pi = new ShaderPropInfo();
-                    pi.name = shader.GetPropertyName(i);
-                    pi.desc = shader.GetPropertyDescription(i);
-                    pi.type = shader.GetPropertyType(i);
-                    shaderInfoList.Add(pi);
-                }
-            }
-            _rule.ResetMapping();
-        }
-    }
+    // private void ResetCachePropInfo(bool isRes)
+    // {
+    //     if (Rule != null)
+    //     {
+    //         List<ShaderPropInfo> shaderInfoList = null;
+    //         Shader shader = null;
+    //         List<Rect> ports = null;
+    //         if (isRes)
+    //         {
+    //             shaderInfoList = Rule.resPropertyInfoList;
+    //             shader = _resShader;
+    //             ports = _resPorts;
+    //         }
+    //         else
+    //         {
+    //             shaderInfoList = Rule.destPropertyInfoList;
+    //             shader = _destShader;
+    //             ports = _destPorts;
+    //         }
+    //
+    //         shaderInfoList.Clear();
+    //         ports.Clear();
+    //         if (shader != null)
+    //         {
+    //             int count = shader.GetPropertyCount();
+    //             for (int i = 0; i < count; i++)
+    //             {
+    //                 ShaderPropInfo pi = new ShaderPropInfo();
+    //                 pi.name = shader.GetPropertyName(i);
+    //                 pi.desc = shader.GetPropertyDescription(i);
+    //                 pi.type = shader.GetPropertyType(i);
+    //                 shaderInfoList.Add(pi);
+    //             }
+    //         }
+    //
+    //         Rule.ResetMapping();
+    //     }
+    // }
 
     private float CalculatePropertyHeight()
     {
@@ -677,11 +785,13 @@ public class ShaderReplacementWindow : EditorWindow
             var count = _resShader.GetPropertyCount();
             h1 = count * _propHeight + (count - 1) * _propInterval;
         }
+
         if (_destShader != null)
         {
             var count = _destShader.GetPropertyCount();
             h2 = count * _propHeight + (count - 1) * _propInterval;
         }
+
         return Mathf.Max(h1, h2);
     }
 
@@ -692,6 +802,7 @@ public class ShaderReplacementWindow : EditorWindow
         {
             return true;
         }
+
         return t1 == t2;
     }
 }
