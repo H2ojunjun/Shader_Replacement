@@ -3,606 +3,635 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using System;
+using System.Linq;
 using UnityEngine.Rendering;
 
-public class ShaderReplacementWindow : EditorWindow
+namespace ShaderReplacement
 {
-    public enum EShowType
+    public class ShaderReplacementWindow : EditorWindow
     {
-        Name,
-        Description
-    }
-
-    [MenuItem("Tools/ShaderReplacement")]
-    public static void ShowWindow()
-    {
-        var window = (ShaderReplacementWindow)GetWindow<ShaderReplacementWindow>("Shader Replacement", true);
-        window.Show();
-    }
-
-    private string ruleFolderPath;
-
-    private Shader _resShader;
-    private Shader _destShader;
-    private ShaderReplaceRule _rule;
-    private EShowType _replacementType = EShowType.Description;
-    private Vector2 _scrollRoot = Vector2.zero;
-    private Vector2 _matScrollRoot = Vector2.zero;
-    private float _propHeight = 30;
-    private float _propInterval = 3;
-    private List<Rect> _resPorts = new List<Rect>();
-    private List<Rect> _destPorts = new List<Rect>();
-    private Rect _ruleRect = new Rect();
-    private Rect _scrollArea;
-    private int _draggingIndex = -1;
-    private bool _showType = true;
-    private bool _isOnlyShowConnect = false;
-    private List<Material> _replacedMat = new List<Material>();
-    private string _resSearchStr;
-
-    private string _destSearchStr;
-    //private Texture _dot;
-    // private Texture dot
-    // {
-    //     get
-    //     {
-    //         if (_dot == null)
-    //         {
-    //             _dot = Resources.Load<Texture>("shaderReplace_dot");
-    //         }
-    //         return _dot;
-    //     }
-    // }
-
-    private ShaderReplaceRule Rule
-    {
-        get => _rule;
-        set
+        private enum EShowType
         {
-            if (_rule != value)
-            {
-                _rule = value;
-                if (_rule != null)
-                {
-                    _resShader = _rule.ResShader;
-                    _destShader = _rule.DestShader;
-                }
-                else
-                {
-                    _resShader = null;
-                    _destShader = null;
-                }
+            Name,
+            Description
+        }
 
-                _resPorts.Clear();
-                _destPorts.Clear();
+        private class MaterialInfo
+        {
+            public Material material;
+            public bool isSelected = true;
+
+            public MaterialInfo(Material material)
+            {
+                this.material = material;
             }
         }
-    }
 
-    private string GetShaderName(Shader shader)
-    {
-        return shader.name.Replace("/", "_");
-    }
-
-    private void DrawBaseInfo()
-    {
-        GUI.enabled = true;
-        if (Rule != null)
+        [MenuItem("Tools/ShaderReplacement")]
+        public static void ShowWindow()
         {
-            GUI.enabled = false;
+            var window = (ShaderReplacementWindow)GetWindow<ShaderReplacementWindow>("Shader Replacement", true);
+            window.Show();
         }
 
-        _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
-        _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
-        GUI.enabled = true;
-        Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
-        if (Rule == null)
+        private string ruleFolderPath;
+
+        private Shader _resShader;
+        private Shader _destShader;
+        private ShaderReplaceRule _rule;
+        private EShowType _replacementType = EShowType.Description;
+        private Vector2 _scrollRoot = Vector2.zero;
+        private Vector2 _matScrollRoot = Vector2.zero;
+        private float _propHeight = 30;
+        private float _propInterval = 3;
+        private List<Rect> _resPorts = new List<Rect>();
+        private List<Rect> _destPorts = new List<Rect>();
+        private Rect _ruleRect = new Rect();
+        private Rect _scrollArea;
+        private int _draggingIndex = -1;
+        private bool _showType = true;
+        private bool _isOnlyShowConnect = false;
+        private List<MaterialInfo> _materialsWithResShader = new();
+        private bool _selectedAllMat = true;
+        private string _resSearchStr;
+
+        private string _destSearchStr;
+
+        private bool SelectedAllMat
         {
-            if (_resShader != null && _destShader != null && GUILayout.Button("创建规则",GUILayout.Width(500), GUILayout.Height(20)))
+            get => _selectedAllMat;
+            set
             {
-                string assetName = $"replace_shader_{GetShaderName(_resShader)}_to_{GetShaderName(_destShader)}";
-                var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", assetName, "asset", "");
-                if (string.IsNullOrEmpty(userSelectPath))
+                if (_selectedAllMat != value)
                 {
-                    Debug.LogError("未选择路径");
-                    return;
-                }
-
-                if (!userSelectPath.Contains("Editor"))
-                {
-                    Debug.LogError("路径中必须包含Editor");
-                    return;
-                }
-
-                var savedRule = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(userSelectPath);
-                if (savedRule != null)
-                {
-                    AssetDatabase.DeleteAsset(userSelectPath);
-                    AssetDatabase.Refresh();
-                }
-                var rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
-                AssetDatabase.CreateAsset(rule, userSelectPath);
-                rule.SetShader(_resShader, _destShader);
-                Rule = rule;
-            }
-        }
-        else
-        {
-            if (GUILayout.Button("重置",GUILayout.Width(500), GUILayout.Height(20)))
-            {
-                Rule = null;
-            }
-
-            _replacementType = (EShowType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
-        }
-    }
-
-    private void OnGUI()
-    {
-        // if (Rule != null)
-        // {
-        //     GUI.enabled = false;
-        // }
-        //
-        // _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
-        // // if (Rule != null)
-        // // {
-        // //     GUI.enabled = true;
-        // // }
-        // //EditorGUI.BeginChangeCheck();
-        // _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
-        // // if (EditorGUI.EndChangeCheck())
-        // // {
-        // //     if (Rule)
-        // //         Rule.SetShader(_destShader, false);
-        // //     ResetCachePropInfo(false);
-        // // }
-        // EditorGUI.BeginChangeCheck();
-        // GUI.enabled = true;
-        // Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
-        // if (EditorGUI.EndChangeCheck())
-        // {
-        //     if (Rule != null)
-        //     {
-        //         _resShader = Rule._resShader;
-        //         _destShader = Rule._destShader;
-        //         _resPorts.Clear();
-        //         _destPorts.Clear();
-        //     }
-        //     else
-        //     {
-        //         _resShader = null;
-        //         _destShader = null;
-        //         _resPorts.Clear();
-        //         _destPorts.Clear();
-        //     }
-        // }
-        //
-        // if (Rule == null)
-        // {
-        //     if (GUILayout.Button("新建规则", GUILayout.Width(500)))
-        //     {
-        //         if (_resShader == null)
-        //         {
-        //             Debug.LogError("请先选择一个源shader");
-        //             return;
-        //         }
-        //
-        //         int index = _resShader.name.LastIndexOf("/");
-        //         string name = _resShader.name.Substring(index);
-        //         string assetName = $"{name}_replacement.asset";
-        //         var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", "Assets", ".asset")
-        //         string path = +assetName;
-        //         var savedCache = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(path);
-        //         if (savedCache != null)
-        //         {
-        //             Debug.LogError($"shader:{name}已经有替换规则了，请勿重复创建");
-        //             return;
-        //         }
-        //         else
-        //         {
-        //             Rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
-        //             AssetDatabase.CreateAsset(Rule, path);
-        //             Rule.SetShader(_resShader, true);
-        //             Rule.SetShader(_destShader, false);
-        //             ResetCachePropInfo(true);
-        //             ResetCachePropInfo(false);
-        //         }
-        //     }
-        // }
-
-        DrawBaseInfo();
-
-        if (Rule != null)
-        {
-            //检测鼠标输入
-            Control();
-            //绘制shader属性控制控件
-            DrawPropertyInfoControll();
-            //绘制shader属性
-            Rect mappingRect = DrawPropertyInfo();
-            //绘制替换后的material列表
-            DrawReplacedMaterials(mappingRect);
-        }
-    }
-
-    private void Control()
-    {
-        var e = Event.current;
-        var mousePos = GetMousePositionInScrollView();
-        switch (e.type)
-        {
-            case EventType.MouseDown:
-                if (_draggingIndex == -1 && e.button == 0)
-                {
-                    _draggingIndex = GetIndexCotainsMousePosition(mousePos, true);
-                }
-
-                break;
-            case EventType.MouseUp:
-                if (_draggingIndex != -1)
-                {
-                    if (e.button == 0)
+                    _selectedAllMat = value;
+                    foreach (var matInfo in _materialsWithResShader)
                     {
-                        int i = GetIndexCotainsMousePosition(mousePos, false);
-                        if (i != -1)
-                        {
-                            var resPropInfo = Rule.resPropertyInfoList[_draggingIndex];
-                            var resType = resPropInfo.type;
-                            var destPropInfo = Rule.destPropertyInfoList[i];
-                            var destType = destPropInfo.type;
-                            if (IsShaderPropertyTypeEqual(resType, destType))
-                            {
-                                bool destHasBeenUse = IsDestHasBeenConnect(i);
-                                if (!destHasBeenUse)
-                                    Rule.SetMapping(_draggingIndex, i);
-                                else
-                                    Debug.LogError(
-                                        $"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
-                            }
-                            else
-                            {
-                                Debug.LogError(
-                                    $"类型不匹配！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
-                                    $"目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color> 目标类型<color=red>{destPropInfo.type}</color>");
-                            }
-                        }
-
-                        _draggingIndex = -1;
+                        matInfo.isSelected = value;
                     }
                 }
-                else
-                {
-                    if (e.button == 1)
-                    {
-                        //尝试根据鼠标位置找到源属性的index
-                        int resIndex = GetIndexCotainsMousePosition(mousePos, true);
-                        if (resIndex == -1)
-                        {
-                            var destIndex = GetIndexCotainsMousePosition(mousePos, false);
-                            if (destIndex != -1)
-                            {
-                                for (int i = 0; i < Rule.propertyMapping.Count; i++)
-                                {
-                                    if (Rule.propertyMapping[i] == destIndex)
-                                    {
-                                        resIndex = i;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (resIndex != -1)
-                        {
-                            GenericMenu menu = new GenericMenu();
-                            menu.AddItem(new GUIContent("break"), false, () => { Rule.SetMapping(resIndex, -1); });
-                            menu.DropDown(new Rect(mousePos, Vector2.zero));
-                        }
-                    }
-                }
-
-                break;
-            default:
-                break;
-        }
-    }
-
-    //目标port是否已经被连接了
-    private bool IsDestHasBeenConnect(int i)
-    {
-        bool destHasBeenUse = false;
-        foreach (var destIndex in Rule.propertyMapping)
-        {
-            if (destIndex == i)
-                destHasBeenUse = true;
-        }
-
-        return destHasBeenUse;
-    }
-
-    private int GetIndexCotainsMousePosition(Vector2 mousePos, bool isRes)
-    {
-        var ports = isRes ? _resPorts : _destPorts;
-        for (int i = 0; i < ports.Count; i++)
-        {
-            if (GetPortAbsolutelyRect(ports[i]).Contains(mousePos))
-            {
-                return i;
             }
         }
 
-        return -1;
-    }
-
-    private Vector2 GetMousePositionInScrollView()
-    {
-        var mousePos = Event.current.mousePosition;
-        if (_scrollArea.Contains(mousePos))
+        private ShaderReplaceRule Rule
         {
-            mousePos = mousePos + _scrollRoot;
-        }
-
-        return mousePos;
-    }
-
-    private Rect GetPortAbsolutelyRect(Rect r)
-    {
-        return new Rect(_scrollArea.position + r.position, r.size);
-    }
-
-    private Rect DrawPropertyInfo()
-    {
-        if (Event.current.type == EventType.Repaint)
-        {
-            _ruleRect = GUILayoutUtility.GetLastRect();
-        }
-
-        var lastRect = _ruleRect;
-        lastRect.y += lastRect.height + 10;
-        lastRect.x += 20;
-        lastRect.width = 700;
-        lastRect.height = Screen.height;
-        GUI.Box(lastRect, "属性映射");
-        Rect mappingRect = lastRect;
-        var height = CalculatePropertyHeight() + 20;
-        _scrollArea = new Rect(lastRect.x + 20, lastRect.y + 20, lastRect.width - 20, Mathf.Min(height, Screen.height - lastRect.y - 50));
-        _scrollRoot = GUI.BeginScrollView(_scrollArea, _scrollRoot, new Rect(0, 0, 400, height));
-        lastRect = new Rect(0, 0, 0, 0);
-        var searchRect = new Rect(lastRect.x, lastRect.y, 220, 20);
-        EditorGUI.BeginChangeCheck();
-        _resSearchStr = EditorGUI.TextField(searchRect, "search:", _resSearchStr);
-        if (EditorGUI.EndChangeCheck())
-        {
-            _resPorts.Clear();
-        }
-
-        DrawProperties(searchRect, true);
-        lastRect.x += 420;
-        searchRect = new Rect(lastRect.x, lastRect.y, 220, 20);
-        EditorGUI.BeginChangeCheck();
-        _destSearchStr = EditorGUI.TextField(searchRect, "search:", _destSearchStr);
-        if (EditorGUI.EndChangeCheck())
-        {
-            _destPorts.Clear();
-        }
-
-        DrawProperties(searchRect, false);
-        DrawMapping();
-        DrawMouseDragingLine();
-        GUI.EndScrollView();
-        return mappingRect;
-    }
-
-    private void DrawProperties(Rect lastRect, bool isRes)
-    {
-        lastRect = new Rect(lastRect.x, lastRect.y + lastRect.height, 220, 30);
-        var shader = isRes ? _resShader : _destShader;
-        var propertyInfoList = isRes ? Rule.resPropertyInfoList : Rule.destPropertyInfoList;
-        var portXOffset = isRes ? lastRect.width - 6 : -6;
-        var ports = isRes ? _resPorts : _destPorts;
-        var searchStr = isRes ? _resSearchStr : _destSearchStr;
-        bool isRecalculatePort = ports.Count == 0;
-
-        if (shader != null)
-        {
-            int index = 0;
-            foreach (var info in propertyInfoList)
+            get => _rule;
+            set
             {
-                info.visible = true;
-                if (_isOnlyShowConnect)
+                if (_rule != value)
                 {
-                    if (isRes)
+                    _rule = value;
+                    _materialsWithResShader.Clear();
+                    if (_rule != null)
                     {
-                        info.visible = Rule.propertyMapping[index] != -1;
+                        _resShader = _rule.ResShader;
+                        _destShader = _rule.DestShader;
+                        CollectAllMaterialWithResShader();
+                        SelectedAllMat = true;
                     }
                     else
                     {
-                        info.visible = IsDestHasBeenConnect(index);
-                    }
-                }
-
-                string showText = null;
-                switch (_replacementType)
-                {
-                    case EShowType.Name:
-                        showText = info.name;
-                        break;
-                    case EShowType.Description:
-                        showText = info.desc;
-                        break;
-                    default:
-                        break;
-                }
-
-                if (!string.IsNullOrEmpty(searchStr))
-                {
-                    if (!showText.ToLower().Contains(searchStr.ToLower()))
-                    {
-                        info.visible = false;
-                    }
-                }
-
-                if (info.visible)
-                {
-                    if (_showType)
-                        showText += $":<color=red>{info.type.ToString()}</color>";
-                    EditorGUI.LabelField(lastRect, showText, new GUIStyle("frameBox"));
-                    var c = GUI.color;
-                    GUI.color = Color.red;
-                    Rect portRect = new Rect(lastRect.x + portXOffset, lastRect.y + lastRect.height / 2 - 6, 12, 12);
-                    //GUI.DrawTexture(portRect, dot);
-                    Handles.DrawSolidDisc(portRect.position, Vector3.forward, 6);
-                    if (isRecalculatePort)
-                    {
-                        ports.Add(portRect);
+                        _resShader = null;
+                        _destShader = null;
                     }
 
-                    GUI.color = c;
-                    lastRect.y += lastRect.height + _propInterval;
+                    _resPorts.Clear();
+                    _destPorts.Clear();
                 }
-                else
-                {
-                    if (isRecalculatePort)
-                    {
-                        ports.Add(Rect.zero);
-                    }
-                }
-
-                index++;
             }
         }
-    }
 
-    private void DrawMapping()
-    {
-        for (int i = 0; i < Rule.propertyMapping.Count; i++)
+        private void CollectAllMaterialWithResShader()
         {
-            if (Rule.resPropertyInfoList[i].visible)
+            var paths = AssetDatabase.FindAssets("t:material", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath);
+            foreach (var path in paths)
             {
-                var destIndex = Rule.propertyMapping[i];
-                if (destIndex >= 0)
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (mat.shader == _resShader && AssetDatabase.IsMainAsset(mat))
                 {
-                    if (Rule.destPropertyInfoList.Count > 0 && destIndex < Rule.destPropertyInfoList.Count && Rule.destPropertyInfoList[destIndex].visible)
-                    {
-                        Rect resPortRect = _resPorts[i];
-                        Rect destPortRect = _destPorts[destIndex];
-                        Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2),
-                            destPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2));
-                    }
+                    _materialsWithResShader.Add(new(mat));
                 }
             }
         }
-    }
 
-    private void DrawMouseDragingLine()
-    {
-        if (_draggingIndex != -1)
+        private string GetShaderName(Shader shader)
         {
+            return shader.name.Replace("/", "_");
+        }
+
+        private void DrawBaseInfo()
+        {
+            GUI.enabled = true;
+            if (Rule != null)
+            {
+                GUI.enabled = false;
+            }
+
+            _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
+            _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
+            GUI.enabled = true;
+            Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
+            if (Rule == null)
+            {
+                if (_resShader != null && _destShader != null && GUILayout.Button("创建规则", GUILayout.Width(500), GUILayout.Height(20)))
+                {
+                    string assetName = $"replace_shader_{GetShaderName(_resShader)}_to_{GetShaderName(_destShader)}";
+                    var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", assetName, "asset", "");
+                    if (string.IsNullOrEmpty(userSelectPath))
+                    {
+                        Debug.LogError("未选择路径");
+                        return;
+                    }
+
+                    if (!userSelectPath.Contains("Editor"))
+                    {
+                        Debug.LogError("路径中必须包含Editor");
+                        return;
+                    }
+
+                    var savedRule = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(userSelectPath);
+                    if (savedRule != null)
+                    {
+                        AssetDatabase.DeleteAsset(userSelectPath);
+                        AssetDatabase.Refresh();
+                    }
+
+                    var rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
+                    AssetDatabase.CreateAsset(rule, userSelectPath);
+                    rule.SetShader(_resShader, _destShader);
+                    Rule = rule;
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("重置", GUILayout.Width(500), GUILayout.Height(20)))
+                {
+                    Rule = null;
+                }
+
+                _replacementType = (EShowType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
+            }
+        }
+
+        private void OnGUI()
+        {
+            // if (Rule != null)
+            // {
+            //     GUI.enabled = false;
+            // }
+            //
+            // _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
+            // // if (Rule != null)
+            // // {
+            // //     GUI.enabled = true;
+            // // }
+            // //EditorGUI.BeginChangeCheck();
+            // _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
+            // // if (EditorGUI.EndChangeCheck())
+            // // {
+            // //     if (Rule)
+            // //         Rule.SetShader(_destShader, false);
+            // //     ResetCachePropInfo(false);
+            // // }
+            // EditorGUI.BeginChangeCheck();
+            // GUI.enabled = true;
+            // Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
+            // if (EditorGUI.EndChangeCheck())
+            // {
+            //     if (Rule != null)
+            //     {
+            //         _resShader = Rule._resShader;
+            //         _destShader = Rule._destShader;
+            //         _resPorts.Clear();
+            //         _destPorts.Clear();
+            //     }
+            //     else
+            //     {
+            //         _resShader = null;
+            //         _destShader = null;
+            //         _resPorts.Clear();
+            //         _destPorts.Clear();
+            //     }
+            // }
+            //
+            // if (Rule == null)
+            // {
+            //     if (GUILayout.Button("新建规则", GUILayout.Width(500)))
+            //     {
+            //         if (_resShader == null)
+            //         {
+            //             Debug.LogError("请先选择一个源shader");
+            //             return;
+            //         }
+            //
+            //         int index = _resShader.name.LastIndexOf("/");
+            //         string name = _resShader.name.Substring(index);
+            //         string assetName = $"{name}_replacement.asset";
+            //         var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", "Assets", ".asset")
+            //         string path = +assetName;
+            //         var savedCache = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(path);
+            //         if (savedCache != null)
+            //         {
+            //             Debug.LogError($"shader:{name}已经有替换规则了，请勿重复创建");
+            //             return;
+            //         }
+            //         else
+            //         {
+            //             Rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
+            //             AssetDatabase.CreateAsset(Rule, path);
+            //             Rule.SetShader(_resShader, true);
+            //             Rule.SetShader(_destShader, false);
+            //             ResetCachePropInfo(true);
+            //             ResetCachePropInfo(false);
+            //         }
+            //     }
+            // }
+
+            DrawBaseInfo();
+
+            if (Rule != null)
+            {
+                //检测鼠标输入
+                Control();
+                //绘制shader属性控制控件
+                DrawPropertyInfoControl();
+                //绘制shader属性
+                Rect mappingRect = DrawPropertyInfo();
+                //绘制替换后的material列表
+                DrawReplacedMaterials(mappingRect);
+            }
+        }
+
+        private void Refresh()
+        {
+            var rule = Rule;
+            Rule = null;
+            Rule = rule;
             Repaint();
-            var resPortRect = _resPorts[_draggingIndex];
-            Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.size.x / 2, resPortRect.size.y / 2), Event.current.mousePosition);
-        }
-    }
-
-    private void DrawPropertyInfoControll()
-    {
-        EditorGUILayout.BeginHorizontal();
-        _showType = EditorGUILayout.ToggleLeft("展示属性类型", _showType, GUILayout.Width(100));
-        EditorGUI.BeginChangeCheck();
-        _isOnlyShowConnect = EditorGUILayout.ToggleLeft("仅显示已连接", _isOnlyShowConnect, GUILayout.Width(100));
-        if (EditorGUI.EndChangeCheck())
-        {
-            _resPorts.Clear();
-            _destPorts.Clear();
         }
 
-        if (GUILayout.Button("清除属性映射", GUILayout.Width(150)))
+        private void Control()
         {
-            if (EditorUtility.DisplayDialog("警告!", "你确定要清除映射吗?", "确定", "取消"))
+            var e = Event.current;
+            var mousePos = GetMousePositionInScrollView();
+            switch (e.type)
             {
-                Rule.ResetMapping();
+                case EventType.MouseDown:
+                    if (_draggingIndex == -1 && e.button == 0)
+                    {
+                        _draggingIndex = GetIndexContainsMousePosition(mousePos, true);
+                    }
+
+                    break;
+                case EventType.MouseUp:
+                    if (_draggingIndex != -1)
+                    {
+                        if (e.button == 0)
+                        {
+                            int i = GetIndexContainsMousePosition(mousePos, false);
+                            if (i != -1)
+                            {
+                                var resPropInfo = Rule.resPropertyInfoList[_draggingIndex];
+                                var resType = resPropInfo.type;
+                                var destPropInfo = Rule.destPropertyInfoList[i];
+                                var destType = destPropInfo.type;
+                                if (IsShaderPropertyTypeEqual(resType, destType))
+                                {
+                                    bool destHasBeenUse = IsDestHasBeenConnect(i);
+                                    if (!destHasBeenUse)
+                                        Rule.SetMapping(_draggingIndex, i);
+                                    else
+                                        Debug.LogError(
+                                            $"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
+                                }
+                                else
+                                {
+                                    Debug.LogError(
+                                        $"类型不匹配！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
+                                        $"目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color> 目标类型<color=red>{destPropInfo.type}</color>");
+                                }
+                            }
+
+                            _draggingIndex = -1;
+                        }
+                    }
+                    else
+                    {
+                        if (e.button == 1)
+                        {
+                            //尝试根据鼠标位置找到源属性的index
+                            int resIndex = GetIndexContainsMousePosition(mousePos, true);
+                            if (resIndex == -1)
+                            {
+                                var destIndex = GetIndexContainsMousePosition(mousePos, false);
+                                if (destIndex != -1)
+                                {
+                                    for (int i = 0; i < Rule.propertyMapping.Count; i++)
+                                    {
+                                        if (Rule.propertyMapping[i] == destIndex)
+                                        {
+                                            resIndex = i;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (resIndex != -1)
+                            {
+                                GenericMenu menu = new GenericMenu();
+                                menu.AddItem(new GUIContent("break"), false, () => { Rule.SetMapping(resIndex, -1); });
+                                menu.DropDown(new Rect(mousePos, Vector2.zero));
+                            }
+                        }
+                    }
+
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        //目标port是否已经被连接了
+        private bool IsDestHasBeenConnect(int i)
+        {
+            bool destHasBeenUse = false;
+            foreach (var destIndex in Rule.propertyMapping)
+            {
+                if (destIndex == i)
+                    destHasBeenUse = true;
+            }
+
+            return destHasBeenUse;
+        }
+
+        private int GetIndexContainsMousePosition(Vector2 mousePos, bool isRes)
+        {
+            var ports = isRes ? _resPorts : _destPorts;
+            for (int i = 0; i < ports.Count; i++)
+            {
+                if (GetPortAbsolutelyRect(ports[i]).Contains(mousePos))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private Vector2 GetMousePositionInScrollView()
+        {
+            var mousePos = Event.current.mousePosition;
+            if (_scrollArea.Contains(mousePos))
+            {
+                mousePos += _scrollRoot;
+            }
+
+            return mousePos;
+        }
+
+        private Rect GetPortAbsolutelyRect(Rect r)
+        {
+            return new Rect(_scrollArea.position + r.position, r.size);
+        }
+
+        private Rect DrawPropertyInfo()
+        {
+            if (Event.current.type == EventType.Repaint)
+            {
+                _ruleRect = GUILayoutUtility.GetLastRect();
+            }
+
+            var lastRect = _ruleRect;
+            lastRect.y += lastRect.height + 10;
+            lastRect.x += 20;
+            lastRect.width = 700;
+            lastRect.height = Screen.height;
+            GUI.Box(lastRect, "属性映射");
+            Rect mappingRect = lastRect;
+            var height = CalculatePropertyHeight() + 20;
+            _scrollArea = new Rect(lastRect.x + 20, lastRect.y + 20, lastRect.width - 20, Mathf.Min(height, Screen.height - lastRect.y - 50));
+            _scrollRoot = GUI.BeginScrollView(_scrollArea, _scrollRoot, new Rect(0, 0, 400, height));
+            lastRect = new Rect(0, 0, 0, 0);
+            var searchRect = new Rect(lastRect.x, lastRect.y, 220, 20);
+            EditorGUI.BeginChangeCheck();
+            _resSearchStr = EditorGUI.TextField(searchRect, "search:", _resSearchStr);
+            if (EditorGUI.EndChangeCheck())
+            {
+                _resPorts.Clear();
+            }
+
+            DrawProperties(searchRect, true);
+
+            lastRect.x += 420;
+            searchRect = new Rect(lastRect.x, lastRect.y, 220, 20);
+            EditorGUI.BeginChangeCheck();
+            _destSearchStr = EditorGUI.TextField(searchRect, "search:", _destSearchStr);
+            if (EditorGUI.EndChangeCheck())
+            {
+                _destPorts.Clear();
+            }
+
+            DrawProperties(searchRect, false);
+
+            DrawMapping();
+            DrawMouseDraggingLine();
+            GUI.EndScrollView();
+            return mappingRect;
+        }
+
+        private void DrawProperties(Rect lastRect, bool isRes)
+        {
+            lastRect = new Rect(lastRect.x, lastRect.y + lastRect.height, 220, 30);
+            var shader = isRes ? _resShader : _destShader;
+            var propertyInfoList = isRes ? Rule.resPropertyInfoList : Rule.destPropertyInfoList;
+            var portXOffset = isRes ? lastRect.width - 6 : -6;
+            var portYOffset = lastRect.height / 2 - 6;
+            var ports = isRes ? _resPorts : _destPorts;
+            var searchStr = isRes ? _resSearchStr : _destSearchStr;
+            bool isRecalculatePort = ports.Count == 0;
+
+            if (shader != null)
+            {
+                int index = 0;
+                foreach (var info in propertyInfoList)
+                {
+                    info.visible = true;
+                    if (_isOnlyShowConnect)
+                    {
+                        if (isRes)
+                        {
+                            info.visible = Rule.propertyMapping[index] != -1;
+                        }
+                        else
+                        {
+                            info.visible = IsDestHasBeenConnect(index);
+                        }
+                    }
+
+                    string showText = "";
+                    switch (_replacementType)
+                    {
+                        case EShowType.Name:
+                            showText = info.name;
+                            break;
+                        case EShowType.Description:
+                            showText = info.desc;
+                            break;
+                        default:
+                            break;
+                    }
+
+                    if (!string.IsNullOrEmpty(searchStr))
+                    {
+                        if (!showText.ToLower().Contains(searchStr.ToLower()))
+                        {
+                            info.visible = false;
+                        }
+                    }
+
+                    if (info.visible)
+                    {
+                        if (_showType)
+                            showText += $":<color=red>{info.type.ToString()}</color>";
+                        EditorGUI.LabelField(lastRect, showText, new GUIStyle("frameBox"));
+                        var c = Handles.color;
+                        Handles.color = Color.red;
+                        Rect portRect = new Rect(lastRect.x + portXOffset, lastRect.y + portYOffset, 12, 12);
+                        Handles.DrawSolidDisc(portRect.position + new Vector2(portRect.width / 2, portRect.height / 2), Vector3.forward, 6);
+                        if (isRecalculatePort)
+                        {
+                            ports.Add(portRect);
+                        }
+
+                        Handles.color = c;
+                        lastRect.y += lastRect.height + _propInterval;
+                    }
+                    else
+                    {
+                        if (isRecalculatePort)
+                        {
+                            ports.Add(Rect.zero);
+                        }
+                    }
+
+                    index++;
+                }
+            }
+        }
+
+        private void DrawMapping()
+        {
+            for (int i = 0; i < Rule.propertyMapping.Count; i++)
+            {
+                if (Rule.resPropertyInfoList[i].visible)
+                {
+                    var destIndex = Rule.propertyMapping[i];
+                    if (destIndex >= 0)
+                    {
+                        if (Rule.destPropertyInfoList.Count > 0 && destIndex < Rule.destPropertyInfoList.Count && Rule.destPropertyInfoList[destIndex].visible)
+                        {
+                            Rect resPortRect = _resPorts[i];
+                            Rect destPortRect = _destPorts[destIndex];
+                            Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.width / 2, resPortRect.height / 2),
+                                destPortRect.position + new Vector2(destPortRect.width / 2, destPortRect.height / 2));
+                        }
+                    }
+                }
+            }
+        }
+
+        private void DrawMouseDraggingLine()
+        {
+            if (_draggingIndex != -1)
+            {
                 Repaint();
+                var resPortRect = _resPorts[_draggingIndex];
+                Handles.DrawAAPolyLine(resPortRect.position + new Vector2(resPortRect.width / 2, resPortRect.height / 2), Event.current.mousePosition);
             }
         }
 
-        if (GUILayout.Button("按照名字映射", GUILayout.Width(150)))
+        private void DrawPropertyInfoControl()
         {
-            int i = 0;
-            foreach (var resPi in Rule.resPropertyInfoList)
+            EditorGUILayout.BeginHorizontal();
+            _showType = EditorGUILayout.ToggleLeft("展示属性类型", _showType, GUILayout.Width(100));
+            EditorGUI.BeginChangeCheck();
+            _isOnlyShowConnect = EditorGUILayout.ToggleLeft("仅显示已连接", _isOnlyShowConnect, GUILayout.Width(100));
+            if (EditorGUI.EndChangeCheck())
             {
-                _replacementType = EShowType.Name;
-                int j = 0;
-                foreach (var destPi in Rule.destPropertyInfoList)
+                _resPorts.Clear();
+                _destPorts.Clear();
+            }
+
+            if (GUILayout.Button("清除属性映射", GUILayout.Width(150)))
+            {
+                if (EditorUtility.DisplayDialog("警告!", "你确定要清除映射吗?", "确定", "取消"))
                 {
-                    if (destPi.name == resPi.name && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                    Rule.ResetMapping();
+                    Repaint();
+                }
+            }
+
+            if (GUILayout.Button("按照名字映射", GUILayout.Width(150)))
+            {
+                int i = 0;
+                foreach (var resPi in Rule.resPropertyInfoList)
+                {
+                    _replacementType = EShowType.Name;
+                    int j = 0;
+                    foreach (var destPi in Rule.destPropertyInfoList)
                     {
-                        Rule.SetMapping(i, j);
+                        if (destPi.name == resPi.name && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                        {
+                            Rule.SetMapping(i, j);
+                        }
+
+                        j++;
                     }
 
-                    j++;
+                    i++;
                 }
-
-                i++;
             }
-        }
 
-        if (GUILayout.Button("按照描述映射", GUILayout.Width(150)))
-        {
-            _replacementType = EShowType.Description;
-            int i = 0;
-            foreach (var resPi in Rule.resPropertyInfoList)
+            if (GUILayout.Button("按照描述映射", GUILayout.Width(150)))
             {
-                int j = 0;
-                foreach (var destPi in Rule.destPropertyInfoList)
+                _replacementType = EShowType.Description;
+                int i = 0;
+                foreach (var resPi in Rule.resPropertyInfoList)
                 {
-                    if (destPi.desc == resPi.desc && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                    int j = 0;
+                    foreach (var destPi in Rule.destPropertyInfoList)
                     {
-                        Rule.SetMapping(i, j);
+                        if (destPi.desc == resPi.desc && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                        {
+                            Rule.SetMapping(i, j);
+                        }
+
+                        j++;
                     }
 
-                    j++;
+                    i++;
                 }
-
-                i++;
             }
-        }
 
-        if (GUILayout.Button("替换shader", GUILayout.Width(150)))
-        {
-            ReplaceShader();
-        }
-
-        EditorGUILayout.EndHorizontal();
-    }
-
-    private void ReplaceShader()
-    {
-        if (Rule.DestShader == null)
-        {
-            Debug.LogError("目标shader为空，无法替换!");
-            return;
-        }
-
-        _replacedMat.Clear();
-        string folder = EditorUtility.OpenFolderPanel("替换路径", "Assets", "");
-        if (string.IsNullOrEmpty(folder))
-            return;
-        var pathIndex = folder.LastIndexOf("Assets/");
-        folder = folder.Substring(pathIndex);
-        string[] guids = AssetDatabase.FindAssets("t:material", new[] { folder });
-        if (guids == null || guids.Length == 0)
-        {
-            Debug.LogError("没有找到任何源shader对应的材质");
-            return;
-        }
-
-        Dictionary<int, object> resMatProp = new Dictionary<int, object>();
-        foreach (var guid in guids)
-        {
-            var assetPath = AssetDatabase.GUIDToAssetPath(guid);
-            Material m = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
-            if (m != null && m.shader == Rule.ResShader && AssetDatabase.IsMainAsset(m))
+            if (GUILayout.Button("替换shader", GUILayout.Width(150)))
             {
+                ReplaceShader();
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void ReplaceShader()
+        {
+            Dictionary<int, object> resMatProp = new Dictionary<int, object>();
+            foreach (var matInfo in _materialsWithResShader)
+            {
+                if (!matInfo.isSelected)
+                    continue;
+                Material m = matInfo.material;
+                var enableGPUInstancing = m.enableInstancing;
+                var renderQueue = m.renderQueue;
+                var doubleSidedGI = m.doubleSidedGI;
                 EditorUtility.SetDirty(m);
                 resMatProp.Clear();
                 for (int index = 0; index < Rule.propertyMapping.Count; index++)
@@ -656,6 +685,10 @@ public class ShaderReplacementWindow : EditorWindow
                 }
 
                 m.shader = Rule.DestShader;
+                m.enableInstancing = enableGPUInstancing;
+                m.renderQueue = renderQueue;
+                m.doubleSidedGI = doubleSidedGI;
+
                 foreach (var kv in resMatProp)
                 {
                     try
@@ -704,105 +737,111 @@ public class ShaderReplacementWindow : EditorWindow
                     }
                 }
 
-                _replacedMat.Add(m);
+
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                Debug.Log("替换成功！");
+                Refresh();
             }
-
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-            Debug.Log("替换成功！");
-            Repaint();
         }
-    }
 
-    private void DrawReplacedMaterials(Rect lastRect)
-    {
-        if (_replacedMat.Count > 0)
+        private void DrawReplacedMaterials(Rect lastRect)
         {
-            lastRect.x += lastRect.width + 20;
-            lastRect.width = 220;
-            GUI.Box(lastRect, "替换材质列表");
-            var height = _replacedMat.Count * 20;
-            var scrollArea = new Rect(lastRect.x + 20, lastRect.y + 20, lastRect.width - 20, Screen.height - lastRect.y - 50);
-            _matScrollRoot = GUI.BeginScrollView(scrollArea, _matScrollRoot, new Rect(0, 0, 150, height));
-            lastRect = new Rect(0, 0, 200, 20);
-            GUI.enabled = false;
-            foreach (var mat in _replacedMat)
+            if (_materialsWithResShader.Count > 0)
             {
-                EditorGUI.ObjectField(lastRect, mat, typeof(Material), false);
-                lastRect.y += lastRect.height;
+                lastRect.x += lastRect.width + 20;
+                lastRect.width = 220;
+                GUI.Box(lastRect, "替换材质列表");
+                //lastRect.y += lastRect.height;
+                lastRect.y += 20;
+                lastRect.x += 20;
+                SelectedAllMat = GUI.Toggle(new Rect(lastRect.position, new Vector2(80, 20)), SelectedAllMat, "全选/反选");
+                lastRect.y += 20;
+                var height = _materialsWithResShader.Count * 20;
+                var scrollArea = new Rect(lastRect.x, lastRect.y, lastRect.width - 20, Screen.height - lastRect.y - 50);
+                _matScrollRoot = GUI.BeginScrollView(scrollArea, _matScrollRoot, new Rect(0, 0, 150, height));
+                lastRect = new Rect(0, 0, 200, 20);
+                foreach (var matInfo in _materialsWithResShader)
+                {
+                    var toggleRect = new Rect(lastRect.position, new Vector2(20, 20));
+                    matInfo.isSelected = EditorGUI.Toggle(toggleRect, matInfo.isSelected);
+                    var labelRect = new Rect(lastRect.x + 20, lastRect.y, 180, 20);
+                    EditorGUI.ObjectField(labelRect, matInfo.material, typeof(Material), false);
+
+                    lastRect.y += lastRect.height;
+                }
+
+                GUI.EndScrollView();
+            }
+        }
+
+        // private void ResetCachePropInfo(bool isRes)
+        // {
+        //     if (Rule != null)
+        //     {
+        //         List<ShaderPropInfo> shaderInfoList = null;
+        //         Shader shader = null;
+        //         List<Rect> ports = null;
+        //         if (isRes)
+        //         {
+        //             shaderInfoList = Rule.resPropertyInfoList;
+        //             shader = _resShader;
+        //             ports = _resPorts;
+        //         }
+        //         else
+        //         {
+        //             shaderInfoList = Rule.destPropertyInfoList;
+        //             shader = _destShader;
+        //             ports = _destPorts;
+        //         }
+        //
+        //         shaderInfoList.Clear();
+        //         ports.Clear();
+        //         if (shader != null)
+        //         {
+        //             int count = shader.GetPropertyCount();
+        //             for (int i = 0; i < count; i++)
+        //             {
+        //                 ShaderPropInfo pi = new ShaderPropInfo();
+        //                 pi.name = shader.GetPropertyName(i);
+        //                 pi.desc = shader.GetPropertyDescription(i);
+        //                 pi.type = shader.GetPropertyType(i);
+        //                 shaderInfoList.Add(pi);
+        //             }
+        //         }
+        //
+        //         Rule.ResetMapping();
+        //     }
+        // }
+
+        private float CalculatePropertyHeight()
+        {
+            float h1 = 0;
+            float h2 = 0;
+            if (_resShader != null)
+            {
+                var count = _resShader.GetPropertyCount();
+                h1 = count * _propHeight + (count - 1) * _propInterval;
             }
 
-            GUI.enabled = true;
-            GUI.EndScrollView();
+            if (_destShader != null)
+            {
+                var count = _destShader.GetPropertyCount();
+                h2 = count * _propHeight + (count - 1) * _propInterval;
+            }
+
+            return Mathf.Max(h1, h2);
         }
-    }
 
-    // private void ResetCachePropInfo(bool isRes)
-    // {
-    //     if (Rule != null)
-    //     {
-    //         List<ShaderPropInfo> shaderInfoList = null;
-    //         Shader shader = null;
-    //         List<Rect> ports = null;
-    //         if (isRes)
-    //         {
-    //             shaderInfoList = Rule.resPropertyInfoList;
-    //             shader = _resShader;
-    //             ports = _resPorts;
-    //         }
-    //         else
-    //         {
-    //             shaderInfoList = Rule.destPropertyInfoList;
-    //             shader = _destShader;
-    //             ports = _destPorts;
-    //         }
-    //
-    //         shaderInfoList.Clear();
-    //         ports.Clear();
-    //         if (shader != null)
-    //         {
-    //             int count = shader.GetPropertyCount();
-    //             for (int i = 0; i < count; i++)
-    //             {
-    //                 ShaderPropInfo pi = new ShaderPropInfo();
-    //                 pi.name = shader.GetPropertyName(i);
-    //                 pi.desc = shader.GetPropertyDescription(i);
-    //                 pi.type = shader.GetPropertyType(i);
-    //                 shaderInfoList.Add(pi);
-    //             }
-    //         }
-    //
-    //         Rule.ResetMapping();
-    //     }
-    // }
-
-    private float CalculatePropertyHeight()
-    {
-        float h1 = 0;
-        float h2 = 0;
-        if (_resShader != null)
+        private bool IsShaderPropertyTypeEqual(ShaderPropertyType t1, ShaderPropertyType t2)
         {
-            var count = _resShader.GetPropertyCount();
-            h1 = count * _propHeight + (count - 1) * _propInterval;
+            if ((t1 == ShaderPropertyType.Range || t1 == ShaderPropertyType.Float) &&
+                (t2 == ShaderPropertyType.Range || t2 == ShaderPropertyType.Float))
+            {
+                return true;
+            }
+
+            return t1 == t2;
         }
-
-        if (_destShader != null)
-        {
-            var count = _destShader.GetPropertyCount();
-            h2 = count * _propHeight + (count - 1) * _propInterval;
-        }
-
-        return Mathf.Max(h1, h2);
-    }
-
-    private bool IsShaderPropertyTypeEqual(ShaderPropertyType t1, ShaderPropertyType t2)
-    {
-        if ((t1 == ShaderPropertyType.Range || t1 == ShaderPropertyType.Float) &&
-            (t2 == ShaderPropertyType.Range || t2 == ShaderPropertyType.Float))
-        {
-            return true;
-        }
-
-        return t1 == t2;
     }
 }
