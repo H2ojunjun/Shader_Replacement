@@ -237,7 +237,7 @@ namespace ShaderReplacement
                             {
                                 GenericMenu menu = new GenericMenu();
                                 menu.AddItem(new GUIContent("break"), false, () => { Rule.SetMapping(resIndex, -1); });
-                                menu.DropDown(new Rect(mousePos, Vector2.zero));
+                                menu.DropDown(new Rect(Event.current.mousePosition, Vector2.zero));
                             }
                         }
                     }
@@ -492,7 +492,6 @@ namespace ShaderReplacement
 
         private void Mapping(EMappingType mappingType)
         {
-            ClearMapping();
             int i = 0;
             _replacementType = mappingType;
             foreach (var resPi in Rule.resPropertyInfoList)
@@ -590,7 +589,7 @@ namespace ShaderReplacement
                 m.enableInstancing = enableGPUInstancing;
                 m.renderQueue = renderQueue;
                 m.doubleSidedGI = doubleSidedGI;
-
+                
                 foreach (var kv in resMatProp)
                 {
                     try
