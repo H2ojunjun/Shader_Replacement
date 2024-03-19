@@ -10,7 +10,7 @@ namespace ShaderReplacement
 {
     public class ShaderReplacementWindow : EditorWindow
     {
-        private enum EShowType
+        private enum EMappingType
         {
             Name,
             Description
@@ -39,7 +39,7 @@ namespace ShaderReplacement
         private Shader _resShader;
         private Shader _destShader;
         private ShaderReplaceRule _rule;
-        private EShowType _replacementType = EShowType.Description;
+        private EMappingType _replacementType = EMappingType.Description;
         private Vector2 _scrollRoot = Vector2.zero;
         private Vector2 _matScrollRoot = Vector2.zero;
         private float _propHeight = 30;
@@ -87,6 +87,7 @@ namespace ShaderReplacement
                         _resShader = _rule.ResShader;
                         _destShader = _rule.DestShader;
                         CollectAllMaterialWithResShader();
+                        Mapping(EMappingType.Name);
                         SelectedAllMat = true;
                     }
                     else
@@ -103,6 +104,7 @@ namespace ShaderReplacement
 
         private void CollectAllMaterialWithResShader()
         {
+            _materialsWithResShader.Clear();
             var paths = AssetDatabase.FindAssets("t:material", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath);
             foreach (var path in paths)
             {
@@ -130,35 +132,11 @@ namespace ShaderReplacement
             _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
             _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
             GUI.enabled = true;
-            Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
             if (Rule == null)
             {
-                if (_resShader != null && _destShader != null && GUILayout.Button("创建规则", GUILayout.Width(500), GUILayout.Height(20)))
+                if (_resShader != null && _destShader != null && _resShader != _destShader && GUILayout.Button("开始替换", GUILayout.Width(500), GUILayout.Height(20)))
                 {
-                    string assetName = $"replace_shader_{GetShaderName(_resShader)}_to_{GetShaderName(_destShader)}";
-                    var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", assetName, "asset", "");
-                    if (string.IsNullOrEmpty(userSelectPath))
-                    {
-                        Debug.LogError("未选择路径");
-                        return;
-                    }
-
-                    if (!userSelectPath.Contains("Editor"))
-                    {
-                        Debug.LogError("路径中必须包含Editor");
-                        return;
-                    }
-
-                    var savedRule = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(userSelectPath);
-                    if (savedRule != null)
-                    {
-                        AssetDatabase.DeleteAsset(userSelectPath);
-                        AssetDatabase.Refresh();
-                    }
-
-                    var rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
-                    AssetDatabase.CreateAsset(rule, userSelectPath);
-                    rule.SetShader(_resShader, _destShader);
+                    var rule = new ShaderReplaceRule(_resShader, _destShader);
                     Rule = rule;
                 }
             }
@@ -169,86 +147,13 @@ namespace ShaderReplacement
                     Rule = null;
                 }
 
-                _replacementType = (EShowType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
+                _replacementType = (EMappingType)EditorGUILayout.EnumPopup("显示类型", _replacementType, GUILayout.Width(500));
             }
         }
 
         private void OnGUI()
         {
-            // if (Rule != null)
-            // {
-            //     GUI.enabled = false;
-            // }
-            //
-            // _resShader = (Shader)EditorGUILayout.ObjectField("源shader", _resShader, typeof(Shader), false, GUILayout.Width(500));
-            // // if (Rule != null)
-            // // {
-            // //     GUI.enabled = true;
-            // // }
-            // //EditorGUI.BeginChangeCheck();
-            // _destShader = (Shader)EditorGUILayout.ObjectField("目标shader", _destShader, typeof(Shader), false, GUILayout.Width(500));
-            // // if (EditorGUI.EndChangeCheck())
-            // // {
-            // //     if (Rule)
-            // //         Rule.SetShader(_destShader, false);
-            // //     ResetCachePropInfo(false);
-            // // }
-            // EditorGUI.BeginChangeCheck();
-            // GUI.enabled = true;
-            // Rule = (ShaderReplaceRule)EditorGUILayout.ObjectField("替换规则", Rule, typeof(ShaderReplaceRule), false, GUILayout.Width(500), GUILayout.Height(20));
-            // if (EditorGUI.EndChangeCheck())
-            // {
-            //     if (Rule != null)
-            //     {
-            //         _resShader = Rule._resShader;
-            //         _destShader = Rule._destShader;
-            //         _resPorts.Clear();
-            //         _destPorts.Clear();
-            //     }
-            //     else
-            //     {
-            //         _resShader = null;
-            //         _destShader = null;
-            //         _resPorts.Clear();
-            //         _destPorts.Clear();
-            //     }
-            // }
-            //
-            // if (Rule == null)
-            // {
-            //     if (GUILayout.Button("新建规则", GUILayout.Width(500)))
-            //     {
-            //         if (_resShader == null)
-            //         {
-            //             Debug.LogError("请先选择一个源shader");
-            //             return;
-            //         }
-            //
-            //         int index = _resShader.name.LastIndexOf("/");
-            //         string name = _resShader.name.Substring(index);
-            //         string assetName = $"{name}_replacement.asset";
-            //         var userSelectPath = EditorUtility.SaveFilePanelInProject("Save shaderReplacementRule:", "Assets", ".asset")
-            //         string path = +assetName;
-            //         var savedCache = AssetDatabase.LoadAssetAtPath<ShaderReplaceRule>(path);
-            //         if (savedCache != null)
-            //         {
-            //             Debug.LogError($"shader:{name}已经有替换规则了，请勿重复创建");
-            //             return;
-            //         }
-            //         else
-            //         {
-            //             Rule = ScriptableObject.CreateInstance<ShaderReplaceRule>();
-            //             AssetDatabase.CreateAsset(Rule, path);
-            //             Rule.SetShader(_resShader, true);
-            //             Rule.SetShader(_destShader, false);
-            //             ResetCachePropInfo(true);
-            //             ResetCachePropInfo(false);
-            //         }
-            //     }
-            // }
-
             DrawBaseInfo();
-
             if (Rule != null)
             {
                 //检测鼠标输入
@@ -260,14 +165,6 @@ namespace ShaderReplacement
                 //绘制替换后的material列表
                 DrawReplacedMaterials(mappingRect);
             }
-        }
-
-        private void Refresh()
-        {
-            var rule = Rule;
-            Rule = null;
-            Rule = rule;
-            Repaint();
         }
 
         private void Control()
@@ -302,13 +199,13 @@ namespace ShaderReplacement
                                         Rule.SetMapping(_draggingIndex, i);
                                     else
                                         Debug.LogError(
-                                            $"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
+                                            $"目标属性已经被指定过了！源属性:<color=red>{(_replacementType == EMappingType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 目标属性:<color=red>{(_replacementType == EMappingType.Name ? destPropInfo.name : destPropInfo.desc)}</color>");
                                 }
                                 else
                                 {
                                     Debug.LogError(
-                                        $"类型不匹配！源属性:<color=red>{(_replacementType == EShowType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
-                                        $"目标属性:<color=red>{(_replacementType == EShowType.Name ? destPropInfo.name : destPropInfo.desc)}</color> 目标类型<color=red>{destPropInfo.type}</color>");
+                                        $"类型不匹配！源属性:<color=red>{(_replacementType == EMappingType.Name ? resPropInfo.name : resPropInfo.desc)}</color> 源类型:<color=red>{resPropInfo.type}</color> " +
+                                        $"目标属性:<color=red>{(_replacementType == EMappingType.Name ? destPropInfo.name : destPropInfo.desc)}</color> 目标类型<color=red>{destPropInfo.type}</color>");
                                 }
                             }
 
@@ -471,10 +368,10 @@ namespace ShaderReplacement
                     string showText = "";
                     switch (_replacementType)
                     {
-                        case EShowType.Name:
+                        case EMappingType.Name:
                             showText = info.name;
                             break;
-                        case EShowType.Description:
+                        case EMappingType.Description:
                             showText = info.desc;
                             break;
                         default:
@@ -566,51 +463,18 @@ namespace ShaderReplacement
             {
                 if (EditorUtility.DisplayDialog("警告!", "你确定要清除映射吗?", "确定", "取消"))
                 {
-                    Rule.ResetMapping();
-                    Repaint();
+                    ClearMapping();
                 }
             }
 
             if (GUILayout.Button("按照名字映射", GUILayout.Width(150)))
             {
-                int i = 0;
-                foreach (var resPi in Rule.resPropertyInfoList)
-                {
-                    _replacementType = EShowType.Name;
-                    int j = 0;
-                    foreach (var destPi in Rule.destPropertyInfoList)
-                    {
-                        if (destPi.name == resPi.name && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
-                        {
-                            Rule.SetMapping(i, j);
-                        }
-
-                        j++;
-                    }
-
-                    i++;
-                }
+                Mapping(EMappingType.Name);
             }
 
             if (GUILayout.Button("按照描述映射", GUILayout.Width(150)))
             {
-                _replacementType = EShowType.Description;
-                int i = 0;
-                foreach (var resPi in Rule.resPropertyInfoList)
-                {
-                    int j = 0;
-                    foreach (var destPi in Rule.destPropertyInfoList)
-                    {
-                        if (destPi.desc == resPi.desc && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
-                        {
-                            Rule.SetMapping(i, j);
-                        }
-
-                        j++;
-                    }
-
-                    i++;
-                }
+                Mapping(EMappingType.Description);
             }
 
             if (GUILayout.Button("替换shader", GUILayout.Width(150)))
@@ -619,6 +483,44 @@ namespace ShaderReplacement
             }
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        private void ClearMapping()
+        {
+            Rule.ResetMapping();
+        }
+
+        private void Mapping(EMappingType mappingType)
+        {
+            ClearMapping();
+            int i = 0;
+            _replacementType = mappingType;
+            foreach (var resPi in Rule.resPropertyInfoList)
+            {
+                int j = 0;
+                foreach (var destPi in Rule.destPropertyInfoList)
+                {
+                    var isMappingTypeMatch = false;
+                    switch (mappingType)
+                    {
+                        case EMappingType.Name:
+                            isMappingTypeMatch = destPi.name == resPi.name;
+                            break;
+                        case EMappingType.Description:
+                            isMappingTypeMatch = resPi.desc == destPi.desc;
+                            break;
+                    }
+
+                    if (isMappingTypeMatch && IsShaderPropertyTypeEqual(destPi.type, resPi.type) && Rule.propertyMapping[i] == -1 && !IsDestHasBeenConnect(j))
+                    {
+                        Rule.SetMapping(i, j);
+                    }
+
+                    j++;
+                }
+
+                i++;
+            }
         }
 
         private void ReplaceShader()
@@ -736,13 +638,13 @@ namespace ShaderReplacement
                         Debug.LogError($"写入材质时出现异常！res shader prop index:{kv.Key} {e.Message} \r\n {e.StackTrace}");
                     }
                 }
-
-
-                AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-                Debug.Log("替换成功！");
-                Refresh();
             }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("替换成功！");
+            CollectAllMaterialWithResShader();
+            Repaint();
         }
 
         private void DrawReplacedMaterials(Rect lastRect)
@@ -752,7 +654,6 @@ namespace ShaderReplacement
                 lastRect.x += lastRect.width + 20;
                 lastRect.width = 220;
                 GUI.Box(lastRect, "替换材质列表");
-                //lastRect.y += lastRect.height;
                 lastRect.y += 20;
                 lastRect.x += 20;
                 SelectedAllMat = GUI.Toggle(new Rect(lastRect.position, new Vector2(80, 20)), SelectedAllMat, "全选/反选");
@@ -774,45 +675,6 @@ namespace ShaderReplacement
                 GUI.EndScrollView();
             }
         }
-
-        // private void ResetCachePropInfo(bool isRes)
-        // {
-        //     if (Rule != null)
-        //     {
-        //         List<ShaderPropInfo> shaderInfoList = null;
-        //         Shader shader = null;
-        //         List<Rect> ports = null;
-        //         if (isRes)
-        //         {
-        //             shaderInfoList = Rule.resPropertyInfoList;
-        //             shader = _resShader;
-        //             ports = _resPorts;
-        //         }
-        //         else
-        //         {
-        //             shaderInfoList = Rule.destPropertyInfoList;
-        //             shader = _destShader;
-        //             ports = _destPorts;
-        //         }
-        //
-        //         shaderInfoList.Clear();
-        //         ports.Clear();
-        //         if (shader != null)
-        //         {
-        //             int count = shader.GetPropertyCount();
-        //             for (int i = 0; i < count; i++)
-        //             {
-        //                 ShaderPropInfo pi = new ShaderPropInfo();
-        //                 pi.name = shader.GetPropertyName(i);
-        //                 pi.desc = shader.GetPropertyDescription(i);
-        //                 pi.type = shader.GetPropertyType(i);
-        //                 shaderInfoList.Add(pi);
-        //             }
-        //         }
-        //
-        //         Rule.ResetMapping();
-        //     }
-        // }
 
         private float CalculatePropertyHeight()
         {
