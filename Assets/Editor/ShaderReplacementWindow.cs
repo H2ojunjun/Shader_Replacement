@@ -67,7 +67,6 @@ namespace ShaderReplacement
                         _resShader = _rule.ResShader;
                         _destShader = _rule.DestShader;
                         CollectAllMaterialWithResShader();
-                        Mapping(EMappingType.Name);
                         SelectedAllMat = true;
                     }
                     else
