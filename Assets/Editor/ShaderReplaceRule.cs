@@ -10,8 +10,12 @@ namespace ShaderReplacement
         public ShaderPropertyType type;
         public string desc;
         public bool visible = true;
+        public object defaultValue;
     }
 
+    /// <summary>
+    /// 记录源Shader到目标Shader的属性映射
+    /// </summary>
     public class ShaderReplaceRule
     {
         private Shader _resShader;
@@ -60,32 +64,51 @@ namespace ShaderReplacement
             resPropertyInfoList.Clear();
             destPropertyInfoList.Clear();
 
-            int count = _resShader.GetPropertyCount();
-            for (int i = 0; i < count; i++)
-            {
-                ShaderPropInfo pi = new ShaderPropInfo
-                {
-                    name = _resShader.GetPropertyName(i),
-                    desc = _resShader.GetPropertyDescription(i),
-                    type = _resShader.GetPropertyType(i)
-                };
-                resPropertyInfoList.Add(pi);
-            }
+            GetShaderPropertyInfo(_resShader, resPropertyInfoList);
 
-            count = _destShader.GetPropertyCount();
-            for (int i = 0; i < count; i++)
-            {
-                ShaderPropInfo pi = new ShaderPropInfo
-                {
-                    name = _destShader.GetPropertyName(i),
-                    desc = _destShader.GetPropertyDescription(i),
-                    type = _destShader.GetPropertyType(i)
-                };
-                destPropertyInfoList.Add(pi);
-            }
-
-
+            GetShaderPropertyInfo(_destShader, destPropertyInfoList);
+            
             ResetMapping();
+        }
+
+        private void GetShaderPropertyInfo(Shader shader,List<ShaderPropInfo> shaderPropInfos)
+        {
+            shaderPropInfos.Clear();
+            int count = shader.GetPropertyCount();
+            for (int i = 0; i < count; i++)
+            {
+                var type = shader.GetPropertyType(i);
+                object defaultValue = null;
+                switch (type)
+                {
+                    case ShaderPropertyType.Color:
+                        defaultValue = (object)shader.GetPropertyDefaultVectorValue(i);
+                        break;
+                    case ShaderPropertyType.Vector:
+                        defaultValue = (object)shader.GetPropertyDefaultVectorValue(i);
+                        break;
+                    case ShaderPropertyType.Float:
+                        defaultValue = (object)shader.GetPropertyDefaultFloatValue(i);
+                        break;
+                    case ShaderPropertyType.Range:
+                        defaultValue = (object)shader.GetPropertyDefaultFloatValue(i);
+                        break;
+                    case ShaderPropertyType.Texture:
+                        defaultValue = (object)shader.GetPropertyTextureDefaultName(i);
+                        break;
+                    case ShaderPropertyType.Int:
+                        defaultValue = (object)shader.GetPropertyDefaultIntValue(i);
+                        break;
+                }
+                ShaderPropInfo pi = new ShaderPropInfo
+                {
+                    name = shader.GetPropertyName(i),
+                    desc = shader.GetPropertyDescription(i),
+                    type = type,
+                    defaultValue = defaultValue,
+                };
+                shaderPropInfos.Add(pi);
+            }
         }
     }
 }
